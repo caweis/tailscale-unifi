@@ -180,6 +180,39 @@ Set your Tailscale configuration as you would on any other machine.
 tailscale up --advertise-routes="10.0.0.0/24,192.168.0.0/24"
 ```
 
+### Why does this run `ethtool` when Tailscale starts?
+
+Tailscale's [performance guidance](https://tailscale.com/s/ethtool-config-udp-gro) for Linux
+subnet routers and exit nodes is to enable UDP GRO forwarding on the interface carrying the
+default route, so the kernel can batch the encrypted WireGuard UDP flow instead of handling it
+packet by packet. This package applies it on start, which includes boot and the reinstall that
+follows a firmware update:
+
+```sh
+ethtool -K <default route device> rx-udp-gro-forwarding on rx-gro-list off
+```
+
+Upstream notes that `ethtool` settings do not survive a reboot, and suggests a
+networkd-dispatcher or NetworkManager hook to reapply them. On UniFi OS this package already runs
+at boot, so no extra machinery is needed.
+
+It is skipped when `ethtool` is unavailable, when no default route can be found, and when the NIC
+or driver does not support the features; none of those fail the start.
+
+```sh
+# Skip the tuning entirely
+TAILSCALE_ETHTOOL_TUNING="false"
+
+# Apply it to a specific interface instead of the default route device
+TAILSCALE_ETHTOOL_DEVICE="br0"
+```
+
+> [!NOTE]
+> This is independent of `TS_TUN_DISABLE_TCP_GRO` from
+> [Slow TCP throughput on Cloud Gateway devices](#slow-tcp-throughput-on-cloud-gateway-devices),
+> which disables TCP GRO on the `tun` side. They address different halves of the path and both can
+> apply to the same device.
+
 ### Can I automatically route traffic from machines on my local network to Tailscale endpoints?
 
 Yes! As of January 30, 2025, [two][tailscale-pr10828] [changes][tailscale-pr14452] to Tailscale made this possible. Much credit goes to @tomvoss and @jasonwbarnett, who contributed significant effort to the initial implementation, detailed in [this GitHub discussion][tailnet-routing-discussion]. Before continuing, review Tailscale’s [subnet router documentation][tailscale-subnet-router-docs] and make sure you understand subnet routers independently of UniFi OS.

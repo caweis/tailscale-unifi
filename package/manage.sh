@@ -83,6 +83,51 @@ print_device_advisories() {
   esac
 }
 
+# Tailscale's performance guidance for Linux subnet routers and exit nodes is to
+# enable UDP GRO forwarding on the interface carrying the default route, so the
+# kernel can batch the encrypted WireGuard UDP flow instead of handling it packet
+# by packet:
+#
+#   ethtool -K <dev> rx-udp-gro-forwarding on rx-gro-list off
+#
+# See https://tailscale.com/s/ethtool-config-udp-gro.  ethtool settings do not
+# survive a reboot, which is why upstream suggests networkd-dispatcher or
+# NetworkManager hooks.  On UniFi OS we already run at boot (tailscale-install
+# .service and the on_boot.d hook both reach tailscale_start), so applying it
+# here covers reboots and firmware updates without any extra machinery.
+#
+# This is independent of TS_TUN_DISABLE_TCP_GRO, which disables TCP GRO on the
+# tun side; both can apply on the same device.  Set TAILSCALE_ETHTOOL_TUNING to
+# "false" in tailscale-env to skip it.
+default_route_device() {
+  ip route show default 2>/dev/null |
+    awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+
+apply_ethtool_tuning() {
+  _ethtool_tuning="$(read_env_setting TAILSCALE_ETHTOOL_TUNING)"
+  [ "${_ethtool_tuning:-true}" = "true" ] || return 0
+
+  if ! command -v ethtool >/dev/null 2>&1; then
+    echo "ethtool is not available, skipping UDP GRO forwarding tuning" >&2
+    return 0
+  fi
+
+  _netdev="${TAILSCALE_ETHTOOL_DEVICE:-$(default_route_device)}"
+  if [ -z "$_netdev" ]; then
+    echo "Could not determine the default route device, skipping UDP GRO forwarding tuning" >&2
+    return 0
+  fi
+
+  # A NIC or driver that does not expose these features is not an error worth
+  # failing the start over, so report and carry on.
+  if ethtool -K "$_netdev" rx-udp-gro-forwarding on rx-gro-list off >/dev/null 2>&1; then
+    echo "Applied Tailscale's UDP GRO forwarding tuning to ${_netdev}"
+  else
+    echo "Could not apply UDP GRO forwarding tuning to ${_netdev} (not supported by this NIC or driver)" >&2
+  fi
+}
+
 tailscale_status() {
   if ! command -v tailscale >/dev/null 2>&1; then
     echo "Tailscale is not installed"
@@ -100,6 +145,8 @@ tailscale_status() {
 # Returns non-zero (rather than exiting) on failure so callers can recover;
 # under `set -e` a failed call at the top level still aborts the script.
 tailscale_start() {
+  apply_ethtool_tuning
+
   systemctl start tailscaled || true
 
   # Wait a few seconds for the daemon to start
