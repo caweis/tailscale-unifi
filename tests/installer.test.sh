@@ -31,6 +31,7 @@ tar czf "${WORKDIR}/tailscale-unifi.tgz" -C "$PKG" tailscale
 # curl mock: write the package to the -o destination.
 cat > "${BIN}/curl" <<EOF
 #!/usr/bin/env bash
+echo "\$*" >> "${WORKDIR}/curl.args"
 while [ \$# -gt 0 ]; do
     if [ "\$1" = "-o" ]; then cp "${WORKDIR}/tailscale-unifi.tgz" "\$2"; fi
     shift
@@ -72,3 +73,19 @@ TAILSCALED_FLAGS="--verbose 1" sh "${ROOT}/install.sh" >/dev/null 2>&1; assert "
 [[ "$(grep -c '^TAILSCALED_FLAGS=' "$env_file")" -eq 1 ]]; assert "TAILSCALED_FLAGS appears once after repeated overrides"
 assert_contains "$(cat "$env_file")" '^TAILSCALED_FLAGS="--verbose 1"$' "the TAILSCALED_FLAGS override is applied"
 assert_contains "$(cat "$env_file")" "^TS_TUN_DISABLE_TCP_GRO=1$" "a TAILSCALED_FLAGS override keeps other settings"
+
+# ── the download URL follows PACKAGE_REPO ─────────────────────────────────────
+: > "${WORKDIR}/curl.args"
+sh "${ROOT}/install.sh" >/dev/null 2>&1
+assert_contains "$(cat "${WORKDIR}/curl.args")" "github.com/caweis/tailscale-unifi/releases/latest/download" \
+    "install.sh downloads from this fork by default"
+
+: > "${WORKDIR}/curl.args"
+PACKAGE_REPO="SierraSoftworks/tailscale-unifi" sh "${ROOT}/install.sh" >/dev/null 2>&1
+assert_contains "$(cat "${WORKDIR}/curl.args")" "github.com/SierraSoftworks/tailscale-unifi/releases/latest/download" \
+    "PACKAGE_REPO selects a different repository"
+
+: > "${WORKDIR}/curl.args"
+sh "${ROOT}/install.sh" v9.9.9 >/dev/null 2>&1
+assert_contains "$(cat "${WORKDIR}/curl.args")" "releases/download/v9.9.9/tailscale-unifi.tgz" \
+    "a version argument selects that release"

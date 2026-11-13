@@ -4,11 +4,16 @@ set -e
 # Determine the latest version of the Tailscale UniFi package
 VERSION="${1:-latest}"
 
+# The GitHub repository releases are downloaded from.  This fork publishes its
+# own releases, so it defaults to itself; set PACKAGE_REPO to install from a
+# different one, e.g. PACKAGE_REPO=SierraSoftworks/tailscale-unifi.
+PACKAGE_REPO="${PACKAGE_REPO:-caweis/tailscale-unifi}"
+
 if [ "${VERSION}" = "latest" ]; then
   # shellcheck disable=SC2034 # Disable incorrect unused variable warning
-  PACKAGE_URL="https://github.com/SierraSoftworks/tailscale-unifi/releases/latest/download/tailscale-unifi.tgz"
+  PACKAGE_URL="https://github.com/${PACKAGE_REPO}/releases/latest/download/tailscale-unifi.tgz"
 else
-  PACKAGE_URL="https://github.com/SierraSoftworks/tailscale-unifi/releases/download/${VERSION}/tailscale-unifi.tgz"
+  PACKAGE_URL="https://github.com/${PACKAGE_REPO}/releases/download/${VERSION}/tailscale-unifi.tgz"
 fi
 
 # Setup a temporary directory to download the package
